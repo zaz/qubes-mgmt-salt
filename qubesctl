@@ -8,6 +8,7 @@ import argparse
 
 import sys
 import subprocess
+import re
 import qubessalt
 import qubesadmin
 import qubesadmin.vm
@@ -63,12 +64,27 @@ def main(args=None):  # pylint: disable=missing-docstring
             saltutil.sync_all()
 
     if not args.skip_dom0:
-        try:
-            # TODO handle args.show_output - if false, log to some file
-            subprocess.check_call(['qubesctl', '--dom0-only'] + args.command)
-        except subprocess.CalledProcessError:
-            print("DOM0 configuration failed, not continuing", file=sys.stderr)
-            return 1
+        # TODO handle args.show_output - if false, log to some file
+        p = subprocess.Popen(['qubesctl', '--dom0-only'] + args.command,
+                             stdout=subprocess.PIPE, text=True)
+        no_top_file = False
+        no_top_file_regex = re.compile(
+                r'.*Comment: No Top file or master_tops data matches found.')
+        one_error = False
+        one_error_regex = re.compile(r'.*Failed:\W*1\D')
+        for line in p.stdout:
+            sys.stdout.write(line)
+            if no_top_file_regex.match(line):
+                no_top_file = True
+            if one_error_regex.match(line):
+                one_error = True
+        # if the process does not exit successfully
+        if p.wait() != 0:
+            if no_top_file and one_error:
+                print("The above warning indictes that no SALT states exist for dom0.")
+            else:
+                print("Dom0 configuration failed, not continuing", file=sys.stderr)
+                return 1
 
     app = qubesadmin.Qubes()
     # Load VM list only after dom0 salt call - some new VMs might be created
